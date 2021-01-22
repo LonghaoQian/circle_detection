@@ -279,7 +279,6 @@ void find_points(std::vector<Point> &regular_points,
 	std::wcout << "numeber of required threads is: " << MaxRequiredThread << "\n";
 	std::cout << "Hardware Threads are: " << HardwareThreads << "\n";
 	std::cout << "Num Threads Threads is: " << NumThreads << "\n";
-	//size_t NumberPointsPerThread = (NumThreads == MaxRequiredThread ? (size_t)MinPointsPerThread : (circles.size()+ (size_t)NumThreads- 1)/(size_t)NumThreads );
 	size_t totaldistancenumber = (circles.size() - 1)*circles.size() / 2;
 	size_t NumberPointsPerThread = (NumThreads == MaxRequiredThread ? (size_t)MinPointsPerThread : (totaldistancenumber + (size_t)NumThreads- 1)/(size_t)NumThreads );
 	std::vector<size_t> NumberOfDistanceArray;
@@ -293,8 +292,6 @@ void find_points(std::vector<Point> &regular_points,
 	for (auto& t : NumberOfDistanceArray) {
 		std::cout << "number of distances are: " << t << "\n";
 	}
-
-	//std::cout << "Num of Points of threads is: " << NumberPointsPerThread << "\n";
 	std::cout << "Num of distance calculations per thread is: " << NumberPointsPerThread << "\n";
 	std::vector<std::thread> disthread;
 	disthread.reserve(NumThreads - 1);
@@ -308,23 +305,6 @@ void find_points(std::vector<Point> &regular_points,
 		startpoint = GetThreadEndPoint( NumberPointsPerThread, distancepairarray[i - 1]);
 		startpoint.Advance();// advance one step to get the next start point
 		distancepairarray.emplace_back(startpoint);
-	}
-
-	std::cout << "--- result 1-----\n";
-
-	for (auto& t : distancepairarray) {
-		t.Display();
-	}
-	std::cout << "--- result 2-----\n";
-	// verify 
-	distancepair testpoint;
-	testpoint(0, 1);
-	testpoint.Display();
-	for (size_t i = 0; i < NumThreads-1; i++) {// determine the starting index for each thread
-		for (size_t i = 0; i <= NumberPointsPerThread-1; i++) {// determine the starting index for each thread
-			testpoint.Advance();
-		}
-		testpoint.Display();
 	}
 
 	for (size_t i = 0; i < NumThreads - 1; i++) {
@@ -345,7 +325,7 @@ void find_points(std::vector<Point> &regular_points,
 #endif // ASYNC
 
 	
-	MeanMin /= (float)(circles.size());
+	MeanMin /= static_cast<float>(circles.size());
 	// step 2, assume that the number of special points are much less than regular points, all 
 	// points with minmum distance less than the total mean is the special point
 	special_points.clear();
