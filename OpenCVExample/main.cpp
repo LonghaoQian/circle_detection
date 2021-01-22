@@ -38,13 +38,22 @@ The key is the distance table 'Feature' containing 4 distance values.
 The UpdatePointFeature function inputs 'Feature' with the values corresponds to the 4 closest point of a selected point.
 For a special point, the mean value of 'Feature' is lower than 32. The grid stride is determined as 37.6 pixels.
 */
-struct PointEulerDistanceFeature {// TO DO: use operator() to replace all the functions
+struct PointEulerDistanceFeature {
 	float Maxdistance{ 0.0 };  // the maximum distance
 	float Mindistance{ 0.0 }; // the mimum distance
 	size_t MaxDistanceIndex{ 0 }; // the index of the feature
 	size_t MinDistanceIndex{ 0 }; // the index of the min distance
 	Vec4f Feature;             // the distance to the neighbour points
 	Vec4i Indexlist;           // the index in the point list of the neighbour points
+
+	void operator()(float distance, size_t index) {
+		Feature[MaxDistanceIndex] = distance;// record the euler distance
+		Indexlist[MaxDistanceIndex] = index;// record the index of the point in the point list
+		UpdateMaxDistance();
+		UpdateMinDistance();
+	}
+
+
 	void UpdateMaxDistance() { // update the max distance if 'Feature' is modified
 		Maxdistance = Feature[0];
 		MaxDistanceIndex = 0;
@@ -55,6 +64,7 @@ struct PointEulerDistanceFeature {// TO DO: use operator() to replace all the fu
 			}
 		}
 	}
+
 	void UpdateMinDistance() {
 		Mindistance = Feature[0];
 		for (size_t i = 1; i < 4; i++) {
@@ -66,6 +76,89 @@ struct PointEulerDistanceFeature {// TO DO: use operator() to replace all the fu
 	}
 
 };
+struct distancepair{
+// determine the starting point of each thread
+	size_t starting_i{ 0 };
+	size_t starting_j{ 1 };
+	size_t numberofpoints{ 0 };// total number of points
+	size_t current_i{ 0 };
+	size_t current_j{ 1 };
+	void operator()(size_t i, size_t j) {
+		starting_i = i;
+		starting_j = j;
+
+		if ((starting_j - 1) < i) {
+			std::cout << "error in assigning staring points! start i:" << starting_i << ", start j: " << starting_j << "\n";
+		}
+		else {
+			Reset();
+		}
+
+	};
+
+	void operator = (const distancepair& T) {
+		if (this != &T) {
+			starting_i = T.starting_i;
+			starting_j = T.starting_j;
+			current_i = T.current_i;
+			current_j = T.current_j;
+			numberofpoints = T.numberofpoints;
+		}
+	}
+
+	void Advance() {
+		if ((current_j - 1) == current_i) {// means the current index has reach the top of the stack
+			if (current_j == (numberofpoints - 1)) {// means the current the index has reach the last possible one
+				std::cout << "error !, the index has reach the last one, can not advance further more!" << "\n";
+			}
+			else {
+				current_j++;
+				current_i = 0;
+			}
+		}
+		else {
+			current_i++;
+		}
+	}
+	void Reset() {
+		current_i = starting_i;
+		current_j = starting_j;
+	}
+	void Display(){
+		std::cout << "current i:" << current_i << ", current j: " << current_j << "\n";
+	}
+};
+distancepair GetThreadEndPoint (size_t threadpointnumber,const distancepair& starting_pair) {
+	distancepair end_pair = starting_pair;
+	size_t numberpointscurrentstack = starting_pair.starting_j - starting_pair.current_i;
+	size_t remainingpoints = threadpointnumber - numberpointscurrentstack;
+	if (remainingpoints > 0) {// if greater than zero, means that the end point is in an other stack
+		// calculate in which stack
+		double t = static_cast<double>(end_pair.starting_j)+1.0;
+		double a = static_cast<double>(remainingpoints);
+		size_t c1 = static_cast<size_t>(floor(0.5 - t + sqrt(0.25*(2.0*t-1)*(2.0*t-1) + 2.0*a)));
+		size_t c2 = c1 + 1;
+		// verify which stack number is correct
+		size_t b2 = (2 * end_pair.starting_j + c2 + 1)*c2/2 - remainingpoints;
+
+		if (((2 * end_pair.starting_j + c1 + 1)*c1/2) == remainingpoints) {
+			end_pair(c1 + starting_pair.starting_j - 1, c1 + starting_pair.starting_j);
+		}
+		else {
+			end_pair(c2 + starting_pair.starting_j - 1 - b2, c2 + starting_pair.starting_j);
+		}
+
+	}
+	else {
+		// if not in the same stack
+
+		for (int i = 0; i < threadpointnumber; i++) {
+			end_pair.Advance();
+		}
+	}
+
+	return end_pair;
+}
 // draw a rectangular box to a selected point
 void HighLightAPoint(const Vec3f& pointinfo,  Mat& src) {
 	Point topleft = Point(pointinfo[VECTOR_X] + 2.0*pointinfo[2] / sqrt(2), pointinfo[VECTOR_Y] + 2.0*pointinfo[2] / sqrt(2));
@@ -74,73 +167,48 @@ void HighLightAPoint(const Vec3f& pointinfo,  Mat& src) {
 }
 // Update the feature for a selected point
 #ifdef THREAD
-void UpdatePointFeature(const std::vector<Vec3f>& pointlist, std::vector<PointEulerDistanceFeature>& featurelist, size_t index) {
-	// find the distance to the 4 closet points
+void Parallel_UpdateFeature2(const std::vector<Vec3f>& pointlist, std::vector<PointEulerDistanceFeature>& featurelist, 
+							 distancepair pair, // staring index pair
+							 size_t numberofdistance) {// number of required calculations
 	float EulerDistance = 0.0;
-	for (size_t i = 0; i < featurelist.size(); i++) {
-		// distance of 
-		if (i != index) {
-			// only calculate this for points other than the index point
-			// first, calculate the euler distance from the index point to all other points
-			EulerDistance = sqrt((pointlist[i][VECTOR_X] - pointlist[index][VECTOR_X]) * (pointlist[i][VECTOR_X] - pointlist[index][VECTOR_X])
-				+ (pointlist[i][VECTOR_Y] - pointlist[index][VECTOR_Y]) * (pointlist[i][VECTOR_Y] - pointlist[index][VECTOR_Y]));
-			// second, check whether the distance is lower than the maximum value of the recorded distance table
-			// if so, replace the maximum feature with this euler distance and update the feature info
-			mu.lock();
-			if (featurelist[index].Maxdistance >= EulerDistance) {
-				featurelist[index].Feature[featurelist[index].MaxDistanceIndex] = EulerDistance;// record the euler distance
-				featurelist[index].Indexlist[featurelist[index].MaxDistanceIndex] = i;// record the index of the point in the point list
-				featurelist[index].UpdateMaxDistance();
-				featurelist[index].UpdateMinDistance();
+	for (size_t i = 0; i < numberofdistance; i++) {
+			EulerDistance = sqrt((pointlist[pair.current_i][VECTOR_X] - pointlist[pair.current_j][VECTOR_X]) * (pointlist[pair.current_i][VECTOR_X] - pointlist[pair.current_j][VECTOR_X])
+				+ (pointlist[pair.current_i][VECTOR_Y] - pointlist[pair.current_j][VECTOR_Y]) * (pointlist[pair.current_i][VECTOR_Y] - pointlist[pair.current_j][VECTOR_Y]));
+			if (featurelist[pair.current_i].Maxdistance >= EulerDistance) {
+				mu.lock();
+				featurelist[pair.current_i](EulerDistance, pair.current_j);
+				mu.unlock();
 			}
-			mu.unlock();
-		}
+			if (featurelist[pair.current_j].Maxdistance >= EulerDistance) {
+				mu.lock();
+				featurelist[pair.current_j](EulerDistance, pair.current_i);
+				mu.unlock();
+			}
+			pair.Advance();
 	}
 }
 
-void Parallel_UpdateFeature(const std::vector<Vec3f>& pointlist, std::vector<PointEulerDistanceFeature>& featurelist, size_t startpoint, size_t endpoint) {
-	for (size_t j = startpoint; j <= endpoint; j ++) {
-		float EulerDistance = 0.0;
-		for (size_t i = 0; i < featurelist.size(); i++) {
-			// distance of 
-			if (i != j) {
-				// only calculate this for points other than the index point
-				// first, calculate the euler distance from the index point to all other points
-				EulerDistance = sqrt((pointlist[i][VECTOR_X] - pointlist[j][VECTOR_X]) * (pointlist[i][VECTOR_X] - pointlist[j][VECTOR_X])
-					+ (pointlist[i][VECTOR_Y] - pointlist[j][VECTOR_Y]) * (pointlist[i][VECTOR_Y] - pointlist[j][VECTOR_Y]));
-				// second, check whether the distance is lower than the maximum value of the recorded distance table
-				// if so, replace the maximum feature with this euler distance and update the feature info
-				if (featurelist[j].Maxdistance >= EulerDistance) {
-					featurelist[j].Feature[featurelist[j].MaxDistanceIndex] = EulerDistance;// record the euler distance
-					featurelist[j].Indexlist[featurelist[j].MaxDistanceIndex] = i;// record the index of the point in the point list
-					featurelist[j].UpdateMaxDistance();
-					featurelist[j].UpdateMinDistance();
-				}
-			}
-		}
-	}
-}
-#elif
-void UpdatePointFeature(const std::vector<Vec3f>& pointlist, std::vector<PointEulerDistanceFeature>& featurelist, size_t index) {
+#else
+
+void UpdatePointFeature(const std::vector<Vec3f>& pointlist, std::vector<PointEulerDistanceFeature>& featurelist) {
 	// find the distance to the 4 closet points
 	float EulerDistance = 0.0;
-	for (size_t i = 0; i < featurelist.size(); i++) {
-		// distance of 
-		if (i != index) {
-			// only calculate this for points other than the index point
-			// first, calculate the euler distance from the index point to all other points
-			EulerDistance = sqrt((pointlist[i][VECTOR_X] - pointlist[index][VECTOR_X]) * (pointlist[i][VECTOR_X] - pointlist[index][VECTOR_X])
-				+ (pointlist[i][VECTOR_Y] - pointlist[index][VECTOR_Y]) * (pointlist[i][VECTOR_Y] - pointlist[index][VECTOR_Y]));
-			// second, check whether the distance is lower than the maximum value of the recorded distance table
-			// if so, replace the maximum feature with this euler distance and update the feature info
-			if (featurelist[index].Maxdistance >= EulerDistance) {
-				featurelist[index].Feature[featurelist[index].MaxDistanceIndex] = EulerDistance;// record the euler distance
-				featurelist[index].Indexlist[featurelist[index].MaxDistanceIndex] = i;// record the index of the point in the point list
-				featurelist[index].UpdateMaxDistance();
-				featurelist[index].UpdateMinDistance();
-			}
+	distancepair pair;
+	pair(0, 1);
+	size_t totaldistancenumber = (featurelist.size()-1)*featurelist.size()/2;
+
+	for (size_t i = 0; i < totaldistancenumber; i++) {
+		EulerDistance = sqrt((pointlist[pair.current_i][VECTOR_X] - pointlist[pair.current_j][VECTOR_X]) * (pointlist[pair.current_i][VECTOR_X] - pointlist[pair.current_j][VECTOR_X])
+					+ (pointlist[pair.current_i][VECTOR_Y] - pointlist[pair.current_j][VECTOR_Y]) * (pointlist[pair.current_i][VECTOR_Y] - pointlist[pair.current_j][VECTOR_Y]));
+		if (featurelist[pair.current_i].Maxdistance >= EulerDistance) {
+			featurelist[pair.current_i](EulerDistance, pair.current_j);
 		}
+		if (featurelist[pair.current_j].Maxdistance >= EulerDistance) {
+			featurelist[pair.current_j](EulerDistance, pair.current_i);
+		}
+		pair.Advance();
 	}
+
 }
 #endif // ASYNC
 // display the feature of a selected point
@@ -201,7 +269,7 @@ void find_points(std::vector<Point> &regular_points,
 
 	float MeanMin = 0.0;
 #ifdef THREAD
-
+	// calculate the optimum thread allocation
 	unsigned long const MinPointsPerThread = 30; // allocate number of points to be calculated by 1 thread
 	unsigned long const MaxRequiredThread = ((unsigned long)circles.size() + MinPointsPerThread - 1) / MinPointsPerThread;
 	unsigned long const HardwareThreads = std::thread::hardware_concurrency();
@@ -211,24 +279,67 @@ void find_points(std::vector<Point> &regular_points,
 	std::wcout << "numeber of required threads is: " << MaxRequiredThread << "\n";
 	std::cout << "Hardware Threads are: " << HardwareThreads << "\n";
 	std::cout << "Num Threads Threads is: " << NumThreads << "\n";
-	size_t NumberPointsPerThread = (NumThreads == MaxRequiredThread ? (size_t)MinPointsPerThread : (circles.size()+ (size_t)NumThreads- 1)/(size_t)NumThreads );
-	std::cout << "Num of Points of Threads Threads is: " << NumberPointsPerThread << "\n";
+	//size_t NumberPointsPerThread = (NumThreads == MaxRequiredThread ? (size_t)MinPointsPerThread : (circles.size()+ (size_t)NumThreads- 1)/(size_t)NumThreads );
+	size_t totaldistancenumber = (circles.size() - 1)*circles.size() / 2;
+	size_t NumberPointsPerThread = (NumThreads == MaxRequiredThread ? (size_t)MinPointsPerThread : (totaldistancenumber + (size_t)NumThreads- 1)/(size_t)NumThreads );
+	std::vector<size_t> NumberOfDistanceArray;
+	NumberOfDistanceArray.reserve(NumThreads);
+	for (size_t i = 0; i < NumThreads - 1; i++) {// 0 - N-2 same
+		NumberOfDistanceArray.emplace_back(NumberPointsPerThread);
+	}
+	// final one is special
+	NumberOfDistanceArray.emplace_back(totaldistancenumber - (NumThreads - 1)*NumberPointsPerThread);
+
+	for (auto& t : NumberOfDistanceArray) {
+		std::cout << "number of distances are: " << t << "\n";
+	}
+
+	//std::cout << "Num of Points of threads is: " << NumberPointsPerThread << "\n";
+	std::cout << "Num of distance calculations per thread is: " << NumberPointsPerThread << "\n";
 	std::vector<std::thread> disthread;
 	disthread.reserve(NumThreads - 1);
+	// calculate the starting index point for each thread
+	std::vector<distancepair> distancepairarray;
+	distancepairarray.reserve(NumThreads);
+	distancepair startpoint;
+	startpoint(0, 1);
+	distancepairarray.emplace_back(startpoint);// the first element is (0, 1)
+	for (size_t i = 1; i < NumThreads; i++) {// determine the starting index for each thread
+		startpoint = GetThreadEndPoint( NumberPointsPerThread, distancepairarray[i - 1]);
+		startpoint.Advance();// advance one step to get the next start point
+		distancepairarray.emplace_back(startpoint);
+	}
+
+	std::cout << "--- result 1-----\n";
+
+	for (auto& t : distancepairarray) {
+		t.Display();
+	}
+	std::cout << "--- result 2-----\n";
+	// verify 
+	distancepair testpoint;
+	testpoint(0, 1);
+	testpoint.Display();
+	for (size_t i = 0; i < NumThreads-1; i++) {// determine the starting index for each thread
+		for (size_t i = 0; i <= NumberPointsPerThread-1; i++) {// determine the starting index for each thread
+			testpoint.Advance();
+		}
+		testpoint.Display();
+	}
+
 	for (size_t i = 0; i < NumThreads - 1; i++) {
-		disthread.emplace_back(Parallel_UpdateFeature, std::ref(circles), std::ref(Featurelist), i*NumberPointsPerThread, (i + 1)*NumberPointsPerThread - 1);
-	}	
-	
+		disthread.emplace_back(Parallel_UpdateFeature2, std::ref(circles), std::ref(Featurelist), distancepairarray[i], NumberOfDistanceArray[i]);
+	}
 	// calculate the last block
-	Parallel_UpdateFeature(circles, Featurelist, (NumThreads-1)*NumberPointsPerThread, circles.size()-1);
-	// join all threads
+	Parallel_UpdateFeature2(circles, Featurelist, distancepairarray.back(), NumberOfDistanceArray.back());
 	std::for_each(disthread.begin(), disthread.end(),std::mem_fn(&std::thread::join));
 	for (const auto& feature : Featurelist) {// access by const reference 
 		MeanMin += feature.Mindistance;
 	}
-#elif
+#else
+
+	UpdatePointFeature(circles, Featurelist);
 	for (size_t i = 0; i < circles.size(); i++) {
-		UpdatePointFeature(circles, Featurelist, i);
 		MeanMin += Featurelist[i].Mindistance;
 	}
 #endif // ASYNC
