@@ -12,7 +12,7 @@
 > 2. Then for each point, calculate its distance to every other points and record the least 4 values.
 > 3. Assume that the number of special points is much less than the number of regular points so the average of the least distance between two points is approximately the grid size 
 > 4. If both the maximum and minimum least distance of a point to other points are smaller than the grid size by a theshold, then the point is a special point.
-
+> 5. The minimum distance between each point is provided by k-d tree search algorithm
 
 ## You may also open results.PNG to view the result
 
